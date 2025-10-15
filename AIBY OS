@@ -1,0 +1,325 @@
+Amazon EKS Kubernetes Installation GuideEmber.jsPrompt Gemini
+Please setup the deployment for the AIBY OS app for the bearsmithnetwork server and provide a snippet in ember.js code 
+Generate
+Setting up the deployment for an Ember.js application on a Linux server (like your `bearsmithnetwork` server) typically involves building the Ember app, transferring the static assets, configuring a web server (like Nginx) to serve them, and securing it with SSL.
+
+This guide assumes your `bearsmithnetwork` server is running a Debian/Ubuntu-based Linux distribution.
+
+---
+
+## AIBY OS App Deployment for bearsmithnetwork Server
+
+### Prerequisites
+
+#### On Your Local Development Machine:
+1.  **Node.js & npm:** Installed.
+2.  **Ember CLI:** Installed (`npm install -g ember-cli`).
+3.  **Your AIBY OS Ember App:** Ready for production build.
+
+#### On the `bearsmithnetwork` Server:
+1.  **SSH Access:** You can SSH into your server with a user that has `sudo` privileges.
+2.  **Domain Name:** A domain or subdomain pointing to your server's IP address (e.g., `aiby.bearsmithnetwork.com` pointing to `your_server_ip`). This is crucial for SSL.
+3.  **Basic Server Setup:**
+    *   Updated packages: `sudo apt update && sudo apt upgrade -y`
+    *   `ufw` (Uncomplicated Firewall) enabled (recommended).
+
+### I. Local Ember App Setup & Build
+
+1.  **Navigate to your AIBY OS project directory:**
+    ```bash
+    cd path/to/your/aiby-os-app
+    ```
+
+2.  **Ensure `rootURL` and `locationType` are correct in `config/environment.js`:**
+    For single-page applications served from the root of a domain, this is a common setup. The `locationType` set to `history` requires server-side fallback (which Nginx will provide).
+    ```javascript
+    // config/environment.js
+    module.exports = function(environment) {
+      let ENV = {
+        modulePrefix: 'aiby-os',
+        environment,
+        rootURL: '/', // Important: '/' if served from the root (e.g., aiby.bearsmithnetwork.com)
+        locationType: 'history', // Recommended for clean URLs
+        ...
+      };
+
+      if (environment === 'production') {
+        // Here you can add production-specific configuration
+        // ENV.apiHost = 'https://api.aiby.bearsmithnetwork.com';
+        // ENV.gaTrackingId = 'UA-XXXXX-Y';
+      }
+
+      return ENV;
+    };
+    ```
+
+3.  **Build the Ember app for production:**
+    This command compiles your Ember app into static HTML, CSS, and JavaScript files, optimizing them for production. The output will be in the `dist/` directory.
+    ```bash
+    ember build --environment=production
+    ```
+    After this, you should have a `dist/` folder in your project root containing all the production-ready static assets.
+
+### II. Server Setup on `bearsmithnetwork`
+
+#### 1. SSH into your server:
+```bash
+ssh your_user@your_server_ip
+```
+
+#### 2. Install Nginx and Certbot:
+Nginx will serve your Ember app. Certbot (from Let's Encrypt) will provide free SSL certificates.
+```bash
+sudo apt update
+sudo apt install nginx python3-certbot-nginx -y
+```
+
+#### 3. Configure Firewall (UFW):
+Allow Nginx traffic (HTTP and HTTPS).
+```bash
+sudo ufw allow 'Nginx Full'
+sudo ufw enable # if not already enabled
+```
+Confirm status: `sudo ufw status`
+
+#### 4. Create Directory for Your Application:
+This is where your Ember app's static files will live.
+```bash
+sudo mkdir -p /var/www/aiby.bearsmithnetwork.com/html
+sudo chown -R $USER:$USER /var/www/aiby.bearsmithnetwork.com
+```
+*(Replace `$USER` with your actual username if you're not the primary user)*
+
+### III. Deploying the AIBY OS App
+
+#### 1. Transfer Built Files from Local to Server:
+From your **local machine**, navigate back to your Ember app's root directory and use `scp` to copy the `dist/` contents to the server.
+```bash
+cd path/to/your/aiby-os-app # (if not already there)
+scp -r dist/* your_user@your_server_ip:/var/www/aiby.bearsmithnetwork.com/html/
+```
+
+#### 2. Set Permissions on Server:
+Nginx typically runs as the `www-data` user, so it needs read access to your app's files.
+```bash
+sudo chown -R www-data:www-data /var/www/aiby.bearsmithnetwork.com
+sudo chmod -R 755 /var/www/aiby.bearsmithnetwork.com
+```
+
+### IV. Nginx Configuration
+
+#### 1. Create Nginx Server Block:
+Create a new configuration file for your AIBY OS app.
+```bash
+sudo nano /etc/nginx/sites-available/aiby.bearsmithnetwork.com.conf
+```
+
+#### 2. Paste the Nginx Configuration:
+This configuration serves the static files and, importantly, handles the Ember.js History API fallback.
+```nginx
+# /etc/nginx/sites-available/aiby.bearsmithnetwork.com.conf
+server {
+    listen 80;
+    listen [::]:80;
+
+    server_name aiby.bearsmithnetwork.com; # Your domain here
+
+    root /var/www/aiby.bearsmithnetwork.com/html;
+    index index.html index.htm;
+
+    location / {
+        try_files $uri $uri/ /index.html =404; # History API fallback
+    }
+
+    # Optional: Cache static assets
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|woff|woff2|ttf|svg|eot)$ {
+        expires 30d;
+        add_header Cache-Control "public, no-transform";
+    }
+
+    # Optional: Gzip compression for better performance
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_buffers 16 8k;
+    gzip_http_version 1.1;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+}
+```
+
+#### 3. Enable the Nginx Configuration:
+Create a symbolic link to activate the new configuration.
+```bash
+sudo ln -s /etc/nginx/sites-available/aiby.bearsmithnetwork.com.conf /etc/nginx/sites-enabled/
+```
+
+#### 4. Test Nginx Configuration and Restart:
+```bash
+sudo nginx -t
+sudo systemctl restart nginx
+```
+If `nginx -t` reports no errors, your server should now be serving the AIBY OS app on HTTP.
+
+### V. Secure with SSL (HTTPS) using Certbot
+
+#### 1. Run Certbot:
+This command will automatically configure Nginx and obtain an SSL certificate from Let's Encrypt.
+```bash
+sudo certbot --nginx -d aiby.bearsmithnetwork.com
+```
+Follow the prompts. Choose to redirect HTTP to HTTPS.
+
+#### 2. Verify Auto-Renewal:
+Certbot automatically sets up a cron job for renewal. You can test it:
+```bash
+sudo certbot renew --dry-run
+```
+This should run without errors.
+
+### VI. Post-Deployment Checklist
+
+*   **Access the App:** Open `https://aiby.bearsmithnetwork.com` in your browser.
+*   **Check Console for Errors:** Open developer tools (F12) to ensure no network or JavaScript errors.
+*   **Test Routing:** Navigate to different routes within your Ember app (e.g., `https://aiby.bearsmithnetwork.com/dashboard`) and then try refreshing the page. It should load correctly, demonstrating the Nginx fallback is working.
+*   **Check for `index.html` `base` tag:** Ensure it matches `rootURL`.
+    ```html
+    <!-- public/index.html (or generated index.html in dist/) -->
+    <base href="/"> <!-- This should match your rootURL in environment.js -->
+    ```
+
+### VII. Further Enhancements (Optional)
+
+#### 1. Automated Deployment (CI/CD):
+For continuous deployments, consider using tools like GitHub Actions, GitLab CI, or Jenkins. A typical workflow:
+*   On push to `main` branch:
+    *   Build Ember app (`ember build --environment=production`).
+    *   `rsync` the `dist/` folder to the server.
+    *   Trigger `systemctl reload nginx` on the server.
+
+    **Example GitHub Actions Snippet for `rsync` deployment:**
+    ```yaml
+    name: Deploy Ember App to bearsmithnetwork
+
+    on:
+      push:
+        branches:
+          - main
+
+    jobs:
+      deploy:
+        runs-on: ubuntu-latest
+        steps:
+          - name: Checkout code
+            uses: actions/checkout@v3
+
+          - name: Setup Node.js
+            uses: actions/setup-node@v3
+            with:
+              node-version: '18' # Or your project's Node.js version
+
+          - name: Install dependencies
+            run: npm install
+
+          - name: Build Ember app
+            run: ember build --environment=production
+
+          - name: Deploy via Rsync
+            uses: easingthemes/ssh-deploy@v4.1.7
+            with:
+              SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+              ARGS: "-avz --delete"
+              SOURCE: "dist/"
+              TARGET: "/var/www/aiby.bearsmithnetwork.com/html/"
+              REMOTE_HOST: your_server_ip
+              REMOTE_USER: your_user
+              # Optional: Run Nginx reload command after deployment
+              EXCLUDE: "/node_modules/" # Exclude node_modules from copying if it somehow got in dist
+              SCRIPT_AFTER_DEPLOY: |
+                sudo systemctl reload nginx
+            env:
+              # For sudo commands on remote host if needed (use a less privileged user ideally)
+              # If your user needs a password for sudo, this approach might need adjustment
+              # Better to grant your_user passwordless sudo for `systemctl reload nginx`
+              ACTIONS_ALLOW_UNSECURE_COMMANDS: 'true' # Use with caution, consider safer methods
+
+    ```
+    *   **`secrets.SSH_PRIVATE_KEY`**: Store your server's SSH private key in your GitHub repository secrets. Ensure the public key is in `~/.ssh/authorized_keys` for `your_user` on `bearsmithnetwork`.
+    *   **Passwordless `sudo`**: For `sudo systemctl reload nginx`, you'll likely need to configure `your_user` on the server to run this command without a password. Edit `sudo visudo` and add: `your_user ALL=NOPASSWD: /usr/bin/systemctl reload nginx`.
+
+#### 2. `ember-cli-deploy`:
+This is an Ember-specific deployment tool that can streamline the process, handle asset fingerprinting, and integrate with various deployment targets (like S3 for static assets). It's more complex to set up initially but can be very powerful for larger projects.
+
+---
+
+### Ember.js Code Snippet (`config/environment.js`)
+
+This is the most critical part of your Ember.js application code that directly influences deployment, specifically how URLs are handled when served by a web server like Nginx.
+
+```javascript
+// config/environment.js
+
+module.exports = function(environment) {
+  let ENV = {
+    modulePrefix: 'aiby-os',
+    environment,
+    // --- Deployment-related configurations ---
+    rootURL: '/', // Determines the base URL for all assets and routing.
+                  // '/' means the app expects to be served from the root of the domain (e.g., https://aiby.bearsmithnetwork.com/)
+                  // If your app was in a subfolder like /app/, it would be '/app/'.
+    locationType: 'history', // Uses HTML5 History API for clean URLs (e.g., /dashboard instead of /#/dashboard).
+                            // Requires server-side configuration (like Nginx's try_files) to redirect unknown paths to index.html.
+    // ---------------------------------------
+    EmberENV: {
+      FEATURES: {
+        // Here you can enable/disable Ember features
+      },
+      EXTEND_PROTOTYPES: {
+        // Prevent Ember Data from overriding Date.parse.
+        Date: false
+      }
+    },
+
+    APP: {
+      // Here you can pass flags/options to your application instance
+      // when it is created
+    }
+  };
+
+  if (environment === 'development') {
+    // ENV.APP.LOG_RESOLVER = true;
+    // ENV.APP.LOG_ACTIVE_GENERATION = true;
+    // ENV.APP.LOG_TRANSITIONS = true;
+    // ENV.APP.LOG_TRANSITIONS_INTERNAL = true;
+    // ENV.APP.LOG_VIEW_LOOKUPS = true;
+  }
+
+  if (environment === 'test') {
+    // Testem prefers this setting.
+    ENV.locationType = 'none';
+
+    // keep test console output quieter
+    ENV.APP.LOG_ACTIVE_GENERATION = false;
+    ENV.APP.LOG_VIEW_LOOKUPS = false;
+
+    ENV.APP.rootElement = '#ember-testing';
+    ENV.APP.autoboot = false;
+  }
+
+  if (environment === 'production') {
+    // Add production-specific configurations here
+    // For example, API endpoints, analytics IDs, etc.
+    // ENV.apiHost = 'https://api.aiby.bearsmithnetwork.com';
+    // ENV.someSecretKey = process.env.AIBY_OS_SECRET_KEY; // Using environment variables for secrets
+  }
+
+  return ENV;
+};
+```
+
+**Explanation of the snippet:**
+
+*   **`rootURL: '/'`**: This tells Ember where the application expects to be served from. If your AIBY OS app is accessed directly at `aiby.bearsmithnetwork.com`, then `rootURL: '/'` is correct. If it were `aiby.bearsmithnetwork.com/os/`, then `rootURL: '/os/'` would be needed. This value also dictates the `base` tag in your `index.html`.
+*   **`locationType: 'history'`**: This utilizes the HTML5 History API to provide clean, hash-less URLs (e.g., `/dashboard` instead of `/#/dashboard`). For this to work, your web server (Nginx) must be configured to fall back to `index.html` for any paths that don't directly map to a static file. This is handled by the `try_files $uri $uri/ /index.html =404;` directive in the Nginx config.
+
+By following these steps, your AIBY OS Ember app will be successfully deployed, served securely via HTTPS, and accessible to users on the `bearsmithnetwork` server.
